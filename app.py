@@ -1,18 +1,13 @@
-# Streamlit app — SkillCorner Analyzer (Runs + Under Pressure)
+
+# Streamlit app — SkillCorner Analyzer (Runs + Under Pressure + About)
 # Author: GPT-5 Thinking
 # Purpose: Upload CSVs exported from SkillCorner, map columns, compute KPIs for
 # (A) passes to teammate runs and (B) actions under pressure; rank players,
-# visualize trade-offs, and export results. Includes an "About & Methods" tab
-# with metric definitions and references.
+# visualize trade-offs (Altair with hover), export HTML of charts, and export XLSX.
 #
 # How to run locally:
 #   1) pip install -r requirements.txt
-#   2) streamlit run streamlit_app_skillcorner_runs.py
-#
-# Notes
-# - Auto-detects semicolon delimiters and decimal commas; override in the sidebar.
-# - If your column names differ, use the column mapping controls (sidebar → “Column mapping”).
-# - Expected content is aggregated per player (per-match rates). Team-level rows also work.
+#   2) streamlit run streamlit_app_skillcorner_analyzer.py
 
 from __future__ import annotations
 import io
@@ -27,7 +22,7 @@ import altair as alt
 
 st.set_page_config(page_title="SkillCorner Analyzer", page_icon="⚽", layout="wide")
 st.title("⚽ SkillCorner Analyzer")
-st.caption("Upload CSVs, map columns if needed, explore KPIs, visualize, and download leaderboards.")
+st.caption("Upload CSVs, map columns if needed, explore KPIs, visualize, and download leaderboards. All charts include hover tooltips and can be exported to self-contained HTML.")
 
 # --------------------------
 # Utilities
@@ -89,7 +84,6 @@ PRESS_EXPECTED: Dict[str, list[str]] = {
 }
 
 DEFAULT_WEIGHTS_RUNS = {
-    # Composite score to highlight creators who try & complete high-value passes to runs
     "threat_completed_pm": 0.30,
     "completed_runs_pm": 0.20,
     "comp_ratio_runs": 0.20,
@@ -111,10 +105,6 @@ use_comma_decimal = st.sidebar.checkbox("Numbers use comma as decimal (e.g., 12,
 
 runs_df_raw = load_csv(runs_file, use_semicolon, use_comma_decimal)
 press_df_raw = load_csv(press_file, use_semicolon, use_comma_decimal)
-
-# --------------------------
-# Tabs
-# --------------------------
 
 TAB_RUNS, TAB_PRESS, TAB_NOTES = st.tabs(["Runs", "Under Pressure", "About & Methods"])
 
@@ -268,9 +258,7 @@ with TAB_RUNS:
                 )
 
             st.markdown("### Visualizations")
-            base = alt.Chart(df_view.dropna(subset=["attempt_rate_runs", "comp_ratio_runs"])) \
-                .mark_circle(size=70) \
-                .encode(
+            base = alt.Chart(df_view.dropna(subset=["attempt_rate_runs", "comp_ratio_runs"]))                 .mark_circle(size=70)                 .encode(
                     x=alt.X("attempt_rate_runs:Q", title="Attempt rate to runs (attempts / opportunities)"),
                     y=alt.Y("comp_ratio_runs:Q", title="Pass completion to runs"),
                     tooltip=["player", "attempt_rate_runs", "comp_ratio_runs", "threat_completed_pm", "completed_runs_pm"],
@@ -278,20 +266,20 @@ with TAB_RUNS:
             color_choice = st.selectbox("Color points by", ["None", "third", "channel"], index=0, key="runs_color")
             chart = base.encode(color=alt.Color(f"{color_choice}:N")) if color_choice != "None" else base
             st.altair_chart(chart.properties(title="Attempt vs. completion"), use_container_width=True)
+            html1 = chart.properties(title="Attempt vs. completion").to_html()
+            st.download_button("Download HTML — Attempt vs completion", data=html1, file_name="runs_attempt_vs_completion.html", mime="text/html")
 
-            chart2 = alt.Chart(df_view.dropna(subset=["threat_completed_pm", "completed_runs_pm"])) \
-                .mark_circle(size=70) \
-                .encode(
+            chart2 = alt.Chart(df_view.dropna(subset=["threat_completed_pm", "completed_runs_pm"]))                 .mark_circle(size=70)                 .encode(
                     x=alt.X("threat_completed_pm:Q", title="Threat of completed runs per match"),
                     y=alt.Y("completed_runs_pm:Q", title="Completed passes to runs per match"),
                     tooltip=["player", "threat_completed_pm", "completed_runs_pm"],
                 )
             st.altair_chart(chart2.properties(title="Value (threat) vs. volume (completed runs)"), use_container_width=True)
+            html2 = chart2.properties(title="Value (threat) vs. volume (completed runs)").to_html()
+            st.download_button("Download HTML — Threat vs volume", data=html2, file_name="runs_threat_vs_volume.html", mime="text/html")
 
-            # --- Exports: XLSX & HTML charts (Runs)
             st.markdown("### Exports")
-            import io as _io
-            _buf = _io.BytesIO()
+            _buf = io.BytesIO()
             try:
                 with pd.ExcelWriter(_buf, engine="xlsxwriter") as xw:
                     leader_creator.to_excel(xw, sheet_name="Top creators", index=False)
@@ -300,25 +288,6 @@ with TAB_RUNS:
                 st.download_button("Download XLSX — Runs module", data=_buf.getvalue(), file_name="runs_module_leaderboards.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             except Exception as e:
                 st.warning(f"XLSX export unavailable: {e}")
-
-            # Rebuild charts to export as standalone HTML with tooltips
-            _chart_a = alt.Chart(df_view.dropna(subset=["attempt_rate_runs", "comp_ratio_runs"])) \
-                .mark_circle(size=70) \
-                .encode(
-                    x=alt.X("attempt_rate_runs:Q", title="Attempt rate to runs (attempts / opportunities)"),
-                    y=alt.Y("comp_ratio_runs:Q", title="Pass completion to runs"),
-                    tooltip=["player", "attempt_rate_runs", "comp_ratio_runs", "threat_completed_pm", "completed_runs_pm"],
-                )
-            st.download_button("Download HTML — Attempt vs completion", data=_chart_a.to_html(), file_name="runs_attempt_vs_completion.html", mime="text/html")
-
-            _chart_b = alt.Chart(df_view.dropna(subset=["threat_completed_pm", "completed_runs_pm"])) \
-                .mark_circle(size=70) \
-                .encode(
-                    x=alt.X("threat_completed_pm:Q", title="Threat of completed runs per match"),
-                    y=alt.Y("completed_runs_pm:Q", title="Completed passes to runs per match"),
-                    tooltip=["player", "threat_completed_pm", "completed_runs_pm"],
-                )
-            st.download_button("Download HTML — Threat vs volume", data=_chart_b.to_html(), file_name="runs_threat_vs_volume.html", mime="text/html")
 
             with st.expander("Preview raw data (mapped)"):
                 st.dataframe(df.head(25), use_container_width=True)
@@ -393,12 +362,10 @@ with TAB_PRESS:
             dfp['OPR_difficult'] = (dfp['retentions_press_pm'] + dfp['succ_pass_press_difficult_pm']) / (dfp['press_load_pm'] + eps)
             dfp['risk_index'] = 1.0 - dfp['forced_loss_rate_under_pressure']
 
-            # Percentiles (for benchmarking)
             pct = lambda s: s.rank(pct=True, na_option="keep")
             for col in ['OPR','OPR_danger','OPR_difficult','risk_index','comp_ratio_press','comp_ratio_press_danger','comp_ratio_press_difficult','pass_share_under_pressure']:
                 dfp[f'p_{col}'] = pct(dfp[col])
 
-            # Filters
             st.markdown("### Filters")
             min_minutes_p = st.number_input("Min minutes per match", 0.0, value=0.0, step=1.0, key="press_minmins")
             sel_third_p = st.multiselect("Third(s)", options=sorted([x for x in dfp["third"].dropna().unique()]), key="press_third")
@@ -413,7 +380,6 @@ with TAB_PRESS:
                 maskp &= dfp["channel"].isin(sel_channel_p)
             dfp_view = dfp.loc[maskp].copy()
 
-            # Leaderboards
             st.markdown("### Leaderboards")
             n_top_p = st.slider("Top N", 5, 100, 20, step=5, key="press_topn")
 
@@ -432,7 +398,6 @@ with TAB_PRESS:
                 mime="text/csv",
             )
 
-            # Visualizations (user choices)
             st.markdown("### Visualizations")
             vis_choice = st.selectbox("Choose a visualization", [
                 "OPR vs Forced-loss rate",
@@ -442,9 +407,7 @@ with TAB_PRESS:
             ], key="press_vis")
 
             if vis_choice == "OPR vs Forced-loss rate":
-                chart = alt.Chart(dfp_view.dropna(subset=['OPR','forced_loss_rate_under_pressure'])) \
-                    .mark_circle(size=70) \
-                    .encode(
+                chart = alt.Chart(dfp_view.dropna(subset=['OPR','forced_loss_rate_under_pressure']))                     .mark_circle(size=70)                     .encode(
                         x=alt.X('forced_loss_rate_under_pressure:Q', title='Forced-loss rate under pressure (↓ better)'),
                         y=alt.Y('OPR:Q', title='Overcome Pressure Rate (↑ better)'),
                         tooltip=['player','OPR','forced_loss_rate_under_pressure','pressures_pm','pass_att_press_pm']
@@ -453,11 +416,11 @@ with TAB_PRESS:
                 if color_by != "None" and color_by in dfp_view.columns:
                     chart = chart.encode(color=alt.Color(f"{color_by}:N"))
                 st.altair_chart(chart.properties(title="Pressure resilience"), use_container_width=True)
+                htmlp1 = chart.properties(title="Pressure resilience").to_html()
+                st.download_button("Download HTML — OPR vs forced-loss", data=htmlp1, file_name="press_opr_vs_forcedloss.html", mime="text/html")
 
             elif vis_choice == "Pass-share under pressure vs Completion":
-                chart = alt.Chart(dfp_view.dropna(subset=['pass_share_under_pressure','comp_ratio_press'])) \
-                    .mark_circle(size=70) \
-                    .encode(
+                chart = alt.Chart(dfp_view.dropna(subset=['pass_share_under_pressure','comp_ratio_press']))                     .mark_circle(size=70)                     .encode(
                         x=alt.X('pass_share_under_pressure:Q', title='Pass share under pressure'),
                         y=alt.Y('comp_ratio_press:Q', title='Pass completion under pressure'),
                         tooltip=['player','pass_share_under_pressure','comp_ratio_press','OPR']
@@ -466,11 +429,11 @@ with TAB_PRESS:
                 if color_by != "None" and color_by in dfp_view.columns:
                     chart = chart.encode(color=alt.Color(f"{color_by}:N"))
                 st.altair_chart(chart.properties(title="Style vs execution under pressure"), use_container_width=True)
+                htmlp2 = chart.properties(title="Style vs execution under pressure").to_html()
+                st.download_button("Download HTML — Style vs execution", data=htmlp2, file_name="press_style_vs_execution.html", mime="text/html")
 
             elif vis_choice == "OPR (danger) vs OPR (difficult)":
-                chart = alt.Chart(dfp_view.dropna(subset=['OPR_danger','OPR_difficult'])) \
-                    .mark_circle(size=70) \
-                    .encode(
+                chart = alt.Chart(dfp_view.dropna(subset=['OPR_danger','OPR_difficult']))                     .mark_circle(size=70)                     .encode(
                         x=alt.X('OPR_danger:Q', title='OPR (danger)'),
                         y=alt.Y('OPR_difficult:Q', title='OPR (difficult)'),
                         tooltip=['player','OPR_danger','OPR_difficult','pressures_pm']
@@ -479,22 +442,23 @@ with TAB_PRESS:
                 if color_by != "None" and color_by in dfp_view.columns:
                     chart = chart.encode(color=alt.Color(f"{color_by}:N"))
                 st.altair_chart(chart.properties(title="Value vs technical difficulty (under pressure)"), use_container_width=True)
+                htmlp3 = chart.properties(title="Value vs technical difficulty (under pressure)").to_html()
+                st.download_button("Download HTML — OPR(danger) vs OPR(difficult)", data=htmlp3, file_name="press_opr_danger_vs_difficult.html", mime="text/html")
 
             elif vis_choice == "Bar: Top OPR":
                 topn = st.slider("Bar chart — Top N", 5, 30, 15, key="press_bar_topn")
                 df_bar = dfp_view.sort_values('OPR', ascending=False).head(topn)
-                chart = alt.Chart(df_bar).mark_bar() \
-                    .encode(
+                chart = alt.Chart(df_bar).mark_bar()                     .encode(
                         x=alt.X('OPR:Q', title='Overcome Pressure Rate'),
                         y=alt.Y('player:N', sort='-x', title='Player'),
                         tooltip=['player','OPR','pressures_pm','pass_att_press_pm']
                     )
                 st.altair_chart(chart.properties(title="Top OPR"), use_container_width=True)
+                htmlp4 = chart.properties(title="Top OPR").to_html()
+                st.download_button("Download HTML — Top OPR (bar)", data=htmlp4, file_name="press_top_opr_bar.html", mime="text/html")
 
-            # --- Exports: XLSX & HTML charts (Under Pressure)
             st.markdown("### Exports")
-            import io as _io
-            _bufp = _io.BytesIO()
+            _bufp = io.BytesIO()
             try:
                 with pd.ExcelWriter(_bufp, engine="xlsxwriter") as xw:
                     leader_press.to_excel(xw, sheet_name="Under pressure — Top", index=False)
@@ -502,43 +466,6 @@ with TAB_PRESS:
                 st.download_button("Download XLSX — Under Pressure module", data=_bufp.getvalue(), file_name="under_pressure_leaderboards.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             except Exception as e:
                 st.warning(f"XLSX export unavailable: {e}")
-
-            # Offer HTML exports for all four visual variants regardless of the current selection
-            _p1 = alt.Chart(dfp_view.dropna(subset=['OPR','forced_loss_rate_under_pressure'])) \
-                .mark_circle(size=70) \
-                .encode(
-                    x=alt.X('forced_loss_rate_under_pressure:Q', title='Forced-loss rate under pressure (↓ better)'),
-                    y=alt.Y('OPR:Q', title='Overcome Pressure Rate (↑ better)'),
-                    tooltip=['player','OPR','forced_loss_rate_under_pressure','pressures_pm','pass_att_press_pm']
-                )
-            st.download_button("Download HTML — OPR vs forced-loss", data=_p1.to_html(), file_name="press_opr_vs_forcedloss.html", mime="text/html")
-
-            _p2 = alt.Chart(dfp_view.dropna(subset=['pass_share_under_pressure','comp_ratio_press'])) \
-                .mark_circle(size=70) \
-                .encode(
-                    x=alt.X('pass_share_under_pressure:Q', title='Pass share under pressure'),
-                    y=alt.Y('comp_ratio_press:Q', title='Pass completion under pressure'),
-                    tooltip=['player','pass_share_under_pressure','comp_ratio_press','OPR']
-                )
-            st.download_button("Download HTML — Style vs execution", data=_p2.to_html(), file_name="press_style_vs_execution.html", mime="text/html")
-
-            _p3 = alt.Chart(dfp_view.dropna(subset=['OPR_danger','OPR_difficult'])) \
-                .mark_circle(size=70) \
-                .encode(
-                    x=alt.X('OPR_danger:Q', title='OPR (danger)'),
-                    y=alt.Y('OPR_difficult:Q', title='OPR (difficult)'),
-                    tooltip=['player','OPR_danger','OPR_difficult','pressures_pm']
-                )
-            st.download_button("Download HTML — OPR(danger) vs OPR(difficult)", data=_p3.to_html(), file_name="press_opr_danger_vs_difficult.html", mime="text/html")
-
-            _topn = min(15, len(dfp_view))
-            _df_bar = dfp_view.sort_values('OPR', ascending=False).head(_topn)
-            _p4 = alt.Chart(_df_bar).mark_bar().encode(
-                x=alt.X('OPR:Q', title='Overcome Pressure Rate'),
-                y=alt.Y('player:N', sort='-x', title='Player'),
-                tooltip=['player','OPR','pressures_pm','pass_att_press_pm']
-            )
-            st.download_button("Download HTML — Top OPR (bar)", data=_p4.to_html(), file_name="press_top_opr_bar.html", mime="text/html")
 
             with st.expander("Preview raw data (mapped)"):
                 st.dataframe(dfp.head(25), use_container_width=True)
@@ -549,8 +476,7 @@ with TAB_PRESS:
 with TAB_NOTES:
     st.subheader("About this app & methods")
 
-    st.markdown(
-        """
+    st.markdown('''
         **What this app does**
         - **Runs module**: evaluates creation/execution when passing to teammate runs using per-match rates, completion to runs, and the threat associated with completed runs.
         - **Under Pressure module**: evaluates possession outcomes when the player is pressed, separating retention, forced losses, and successful passes (including *dangerous* and *difficult* flavors when available).
@@ -572,13 +498,11 @@ with TAB_NOTES:
         - Under-pressure outcomes capture *press-resistance* — a key differentiator at higher levels.
 
         **Background & references (non-exhaustive)**
-        - Merlin et al. (2022), *Classification and determinants of passing difficulty in soccer* — identifies determinants of pass difficulty (receiver context, ball trajectory, field zones, passer context). These ideas inform how we interpret *dangerous/difficult* passes and contextual filters.
+        - Merlin et al. (2022), *Classification and determinants of passing difficulty in soccer* — determinants of pass difficulty (receiver context, ball trajectory, field zones, passer context).
         - Anzer & Bauer (2022), *Expected passes* — probability models for pass success using positional data; motivates separating completion from *value*.
         - Fernández, Bornn & Cervone (2019/2021), *Expected Possession Value (EPV)* — valuing actions by impact on possession value; motivates the focus on *threat* of completed runs.
 
         **Extending with coordinates**
         - If you upload event/tracking data with start/end coordinates, we can add distance-binned xPass curves, value-vs-distance plots, and leaderboards conditioned on long vs short passes.
-        """
-    )
-
+    ''')
     st.info("Have ideas or different definitions? Adjust weights and filters, or export CSVs to continue analysis in Python/R.")
