@@ -2,7 +2,7 @@
 # Author: GPT-5 Thinking
 # How to run:
 #   1) pip install -r requirements.txt
-#   2) streamlit run app_skillcorner_integrated.py
+#   2) streamlit run app_skillcorner_integrated_fix_keys.py
 
 from __future__ import annotations
 import io
@@ -47,7 +47,7 @@ def load_csv(file: io.BytesIO, semicolon: bool, comma_decimal: bool) -> pd.DataF
         return pd.read_csv(file, sep=sep)
 
 # ----------------------------------
-# Canonical columns (include TEAM/Team/team)
+# Canonical columns (TEAM/Team/team supported)
 # ----------------------------------
 RUNS_EXPECTED: Dict[str, list[str]] = {
     "player": ["player", "name", "Player"],
@@ -89,12 +89,12 @@ TEAM_COLOR_SCHEME = alt.Scale(scheme="tableau20")
 # ----------------------------------
 
 st.sidebar.header("1) Upload CSVs")
-runs_file = st.sidebar.file_uploader("Upload RUNS CSV (player-level)", type=["csv"], key="runs")
-press_file = st.sidebar.file_uploader("Upload UNDER PRESSURE CSV (player-level)", type=["csv"], key="press")
+runs_file = st.sidebar.file_uploader("Upload RUNS CSV (player-level)", type=["csv"], key="runs_uploader")
+press_file = st.sidebar.file_uploader("Upload UNDER PRESSURE CSV (player-level)", type=["csv"], key="press_uploader")
 
 st.sidebar.subheader("Delimiter & decimal")
-use_semicolon = st.sidebar.checkbox("CSV uses semicolon (;) as delimiter", value=True)
-use_comma_decimal = st.sidebar.checkbox("Numbers use comma as decimal (e.g., 12,3)", value=False)
+use_semicolon = st.sidebar.checkbox("CSV uses semicolon (;) as delimiter", value=True, key="delim_semicolon")
+use_comma_decimal = st.sidebar.checkbox("Numbers use comma as decimal (e.g., 12,3)", value=False, key="decimal_comma")
 
 runs_df_raw = load_csv(runs_file, use_semicolon, use_comma_decimal)
 press_df_raw = load_csv(press_file, use_semicolon, use_comma_decimal)
@@ -190,11 +190,11 @@ with TAB_RUNS:
 
             # ---- Filters
             st.markdown("### Filters")
-            min_minutes = st.number_input("Min minutes per match", 0.0, value=0.0, step=1.0)
+            min_minutes = st.number_input("Min minutes per match", 0.0, value=0.0, step=1.0, key="runs_min_minutes")
             teams = sorted([x for x in df["team"].dropna().unique()])
-            sel_teams = st.multiselect("Team(s)", options=teams, default=teams)
-            sel_third = st.multiselect("Third(s)", options=sorted([x for x in df["third"].dropna().unique()]))
-            sel_channel = st.multiselect("Channel(s)", options=sorted([x for x in df["channel"].dropna().unique()]))
+            sel_teams = st.multiselect("Team(s)", options=teams, default=teams, key="runs_team_multiselect")
+            sel_third = st.multiselect("Third(s)", options=sorted([x for x in df["third"].dropna().unique()]), key="runs_third_multiselect")
+            sel_channel = st.multiselect("Channel(s)", options=sorted([x for x in df["channel"].dropna().unique()]), key="runs_channel_multiselect")
 
             mask = pd.Series(True, index=df.index)
             if not pd.isna(df["minutes_pm"]).all():
@@ -370,9 +370,9 @@ with TAB_PRESS:
             st.markdown("### Filters")
             min_minutes_p = st.number_input("Min minutes per match", 0.0, value=0.0, step=1.0, key="press_minmins")
             teams_p = sorted([x for x in dfp["team"].dropna().unique()])
-            sel_teams_p = st.multiselect("Team(s)", options=teams_p, default=teams_p)
-            sel_third_p = st.multiselect("Third(s)", options=sorted([x for x in dfp["third"].dropna().unique()]), key="press_third")
-            sel_channel_p = st.multiselect("Channel(s)", options=sorted([x for x in dfp["channel"].dropna().unique()]), key="press_channel")
+            sel_teams_p = st.multiselect("Team(s)", options=teams_p, default=teams_p, key="press_team_multiselect")
+            sel_third_p = st.multiselect("Third(s)", options=sorted([x for x in dfp["third"].dropna().unique()]), key="press_third_multiselect")
+            sel_channel_p = st.multiselect("Channel(s)", options=sorted([x for x in dfp["channel"].dropna().unique()]), key="press_channel_multiselect")
 
             maskp = pd.Series(True, index=dfp.index)
             if not pd.isna(dfp["minutes_pm"]).all():
@@ -564,16 +564,16 @@ with TAB_RADAR:
                 dfp[c+"_n"] = norm01(dfp[c])
 
             teams_all = [t for t in sorted(dfp['team'].dropna().unique())]
-            team_sel = st.selectbox('Team filter (optional)', ['— All —'] + teams_all)
+            team_sel = st.selectbox('Team filter (optional)', ['— All —'] + teams_all, key="radar_team_filter")
             dfp_view = dfp if team_sel == '— All —' else dfp[dfp['team'] == team_sel]
 
             players = sorted(dfp_view['player'].dropna().unique().tolist())
-            p1 = st.selectbox('Player A', players)
-            p2 = st.selectbox('Player B (optional)', ['—'] + players)
+            p1 = st.selectbox('Player A', players, key="radar_player_a")
+            p2 = st.selectbox('Player B (optional)', ['—'] + players, key="radar_player_b")
             p2 = None if p2 == '—' else p2
 
             metrics_sel = st.multiselect('Radar metrics (3–12)', options=[c for c in dfp_view.columns if c.endswith('_n')],
-                                         default=[c for c in dfp_view.columns if c.endswith('_n')][:8])
+                                         default=[c for c in dfp_view.columns if c.endswith('_n')][:8], key="radar_metrics_sel")
             if len(metrics_sel) < 3:
                 st.info("Select at least 3 metrics.")
             else:
@@ -611,10 +611,10 @@ with TAB_RADAR:
                     colp1, colp2 = st.columns(2)
                     with colp1:
                         buf_png = io.BytesIO(); fig.savefig(buf_png, format='png', dpi=300, bbox_inches='tight'); buf_png.seek(0)
-                        st.download_button('Download Radar (PNG)', buf_png.getvalue(), file_name='player_radar.png')
+                        st.download_button('Download Radar (PNG)', buf_png.getvalue(), file_name='player_radar.png', key="radar_png_dl")
                     with colp2:
                         buf_pdf = io.BytesIO(); fig.savefig(buf_pdf, format='pdf', bbox_inches='tight'); buf_pdf.seek(0)
-                        st.download_button('Download Radar (PDF)', buf_pdf.getvalue(), file_name='player_radar.pdf')
+                        st.download_button('Download Radar (PDF)', buf_pdf.getvalue(), file_name='player_radar.pdf', key="radar_pdf_dl")
                 except Exception as e:
                     st.error(f"Radar plotting requires matplotlib + mplsoccer. Error: {e}")
 
@@ -627,6 +627,8 @@ with TAB_NOTES:
         """
         **Runs module** adds: *expected threat per attempt*, *dangerous attempt share*, and an updated **Creator Index v2**.
         **Under Pressure module** adds: *throughput of successful passes* and a **safe action rate**.
+
+        **Quality exports**: every Altair chart now has **width/height controls** and larger default sizes, so your **HTML exports are bigger and sharper**. Team coloring is consistent using a Tableau palette.
 
         **References (non-exhaustive)**
         - Merlin et al. (2022) — determinants of pass difficulty (receiver, trajectory, zones, passer).
