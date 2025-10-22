@@ -46,12 +46,14 @@ def load_csv(file: io.BytesIO, semicolon: bool, comma_decimal: bool) -> pd.DataF
         file.seek(0)
         return pd.read_csv(file, sep=sep)
 
+TEAM_COLOR_SCHEME = alt.Scale(scheme="tableau20")
+
 # ----------------------------------
-# Canonical columns (TEAM/Team/team supported)
+# Canonical columns
 # ----------------------------------
 RUNS_EXPECTED: Dict[str, list[str]] = {
     "player": ["player", "name", "Player"],
-    "team": ["team", "Team", "TEAM", "club", "squad"],
+    "team": ["team", "club", "squad"],
     "third": ["third", "third of the pitch", "zone third"],
     "channel": ["channel", "lane", "corridor"],
     "minutes_pm": ["minutes played per match", "mins per match", "minutes/match"],
@@ -69,7 +71,7 @@ RUNS_EXPECTED: Dict[str, list[str]] = {
 
 PRESS_EXPECTED: Dict[str, list[str]] = {
     "player": ["player", "name", "Player"],
-    "team": ["team", "Team", "TEAM", "club", "squad"],
+    "team": ["team", "club", "squad"],
     "third": ["third"],
     "channel": ["channel"],
     "minutes_pm": ["minutes played per match"],
@@ -82,83 +84,22 @@ PRESS_EXPECTED: Dict[str, list[str]] = {
     "forced_losses_press_pm": ["count forced losses under pressure per match"],
 }
 
-TEAM_COLOR_SCHEME = alt.Scale(scheme="tableau20")
-
 # ----------------------------------
-# Sidebar — input (unique keys to avoid duplicates)
+# Sidebar — input
 # ----------------------------------
 
 st.sidebar.header("1) Upload CSVs")
-runs_file = st.sidebar.file_uploader("Upload RUNS CSV (player-level)", type=["csv"], key="runs_uploader")
-press_file = st.sidebar.file_uploader("Upload UNDER PRESSURE CSV (player-level)", type=["csv"], key="press_uploader")
+runs_file = st.sidebar.file_uploader("Upload RUNS CSV (player-level)", type=["csv"], key="runs")
+press_file = st.sidebar.file_uploader("Upload UNDER PRESSURE CSV (player-level)", type=["csv"], key="press")
 
 st.sidebar.subheader("Delimiter & decimal")
-use_semicolon = st.sidebar.checkbox("CSV uses semicolon (;) as delimiter", value=True, key="delim_semicolon")
-use_comma_decimal = st.sidebar.checkbox("Numbers use comma as decimal (e.g., 12,3)", value=False, key="decimal_comma")
+use_semicolon = st.sidebar.checkbox("CSV uses semicolon (;) as delimiter", value=True)
+use_comma_decimal = st.sidebar.checkbox("Numbers use comma as decimal (e.g., 12,3)", value=False)
 
 runs_df_raw = load_csv(runs_file, use_semicolon, use_comma_decimal)
 press_df_raw = load_csv(press_file, use_semicolon, use_comma_decimal)
 
 TAB_RUNS, TAB_PRESS, TAB_RADAR, TAB_NOTES = st.tabs(["Runs", "Under Pressure", "Player Radar", "About & Methods"])
-
-# ----------------------------------
-# Helper for highlightable scatter
-# ----------------------------------
-def highlight_scatter(
-    df: pd.DataFrame,
-    x: str,
-    y: str,
-    tooltip: list[str],
-    title: str,
-    width: int,
-    height: int,
-    point_size: int,
-    color_choice: str,
-    highlights: list[str],
-):
-    # Greyed background (all points)
-    background = (
-        alt.Chart(df)
-        .mark_circle(size=point_size)
-        .encode(
-            x=alt.X(f"{x}:Q"),
-            y=alt.Y(f"{y}:Q"),
-            color=alt.value("#bdbdbd"),
-            opacity=alt.value(0.25),
-            tooltip=tooltip,
-        )
-    )
-
-    # Foreground: only highlighted players
-    if highlights:
-        fg = alt.Chart(df).transform_filter(alt.FieldOneOfPredicate(field="player", oneOf=highlights)).mark_circle(size=int(point_size * 1.35), stroke="black", strokeWidth=1).encode(
-            x=alt.X(f"{x}:Q"),
-            y=alt.Y(f"{y}:Q"),
-            tooltip=tooltip,
-        )
-        if color_choice != "None":
-            if color_choice == "team":
-                fg = fg.encode(color=alt.Color("team:N", scale=TEAM_COLOR_SCHEME, legend=alt.Legend(title="Team")))
-            else:
-                fg = fg.encode(color=alt.Color(f"{color_choice}:N"))
-        else:
-            fg = fg.encode(color=alt.value("#1f77b4"))
-        chart = (background + fg).properties(width=width, height=height, title=title)
-    else:
-        # No highlights → use normal coloring choice
-        base = alt.Chart(df).mark_circle(size=point_size).encode(
-            x=alt.X(f"{x}:Q"),
-            y=alt.Y(f"{y}:Q"),
-            tooltip=tooltip,
-        )
-        if color_choice != "None":
-            if color_choice == "team":
-                base = base.encode(color=alt.Color("team:N", scale=TEAM_COLOR_SCHEME, legend=alt.Legend(title="Team")))
-            else:
-                base = base.encode(color=alt.Color(f"{color_choice}:N"))
-        chart = base.properties(width=width, height=height, title=title)
-
-    return chart
 
 # ==================================
 # RUNS TAB
@@ -249,11 +190,11 @@ with TAB_RUNS:
 
             # ---- Filters
             st.markdown("### Filters")
-            min_minutes = st.number_input("Min minutes per match", 0.0, value=0.0, step=1.0, key="runs_min_minutes")
+            min_minutes = st.number_input("Min minutes per match", 0.0, value=0.0, step=1.0)
             teams = sorted([x for x in df["team"].dropna().unique()])
-            sel_teams = st.multiselect("Team(s)", options=teams, default=teams, key="runs_team_multiselect")
-            sel_third = st.multiselect("Third(s)", options=sorted([x for x in df["third"].dropna().unique()]), key="runs_third_multiselect")
-            sel_channel = st.multiselect("Channel(s)", options=sorted([x for x in df["channel"].dropna().unique()]), key="runs_channel_multiselect")
+            sel_teams = st.multiselect("Team(s)", options=teams, default=teams)
+            sel_third = st.multiselect("Third(s)", options=sorted([x for x in df["third"].dropna().unique()]))
+            sel_channel = st.multiselect("Channel(s)", options=sorted([x for x in df["channel"].dropna().unique()]))
 
             mask = pd.Series(True, index=df.index)
             if not pd.isna(df["minutes_pm"]).all():
@@ -279,7 +220,7 @@ with TAB_RUNS:
             st.dataframe(leader_creator.round(3), use_container_width=True)
             st.download_button("Download CSV — Runs creators (v2)", leader_creator.to_csv(index=False).encode("utf-8"), file_name="runs_creators_v2.csv")
 
-            # ---- Visuals with highlight
+            # ---- Visuals (exportable HTML; bigger & better via width/height controls)
             st.markdown("### Visualizations")
             c1, c2, c3 = st.columns([1,1,1])
             with c1:
@@ -290,41 +231,45 @@ with TAB_RUNS:
                 point_size = st.number_input("Point size", 20, 300, 90, step=5, key="runs_pts")
 
             color_choice = st.selectbox("Color points by", ["team","third","channel","None"], index=0, key="runs_color")
-            highlight_players = st.multiselect("Highlight player(s)", options=sorted(df_view["player"].dropna().unique()), key="runs_highlight_players")
 
-            chart1 = highlight_scatter(
-                df_view.dropna(subset=["attempt_rate_runs","comp_ratio_runs"]),
-                x="attempt_rate_runs",
-                y="comp_ratio_runs",
-                tooltip=["player","team","attempt_rate_runs","comp_ratio_runs","threat_completed_pm","completed_runs_pm"],
-                title="Attempt vs Completion",
-                width=chart_w, height=chart_h, point_size=point_size,
-                color_choice=color_choice, highlights=highlight_players
-            )
+            def _apply_color(enc):
+                if color_choice != "None":
+                    if color_choice == "team":
+                        return enc.encode(color=alt.Color("team:N", scale=TEAM_COLOR_SCHEME, legend=alt.Legend(title="Team")))
+                    return enc.encode(color=alt.Color(f"{color_choice}:N"))
+                return enc
+
+            base = alt.Chart(df_view.dropna(subset=["attempt_rate_runs","comp_ratio_runs"])) \
+                .mark_circle(size=point_size) \
+                .encode(
+                    x=alt.X("attempt_rate_runs:Q", title="Attempt rate to runs (attempts / opportunities)"),
+                    y=alt.Y("comp_ratio_runs:Q", title="Pass completion to runs"),
+                    tooltip=["player","team","attempt_rate_runs","comp_ratio_runs","threat_completed_pm","completed_runs_pm"],
+                )
+            chart1 = _apply_color(base).properties(width=chart_w, height=chart_h, title="Attempt vs Completion")
             st.altair_chart(chart1, use_container_width=True)
             st.download_button("Download HTML — Attempt vs Completion", chart1.to_html(), file_name="runs_attempt_vs_completion.html")
 
-            chart2 = highlight_scatter(
-                df_view.dropna(subset=["exp_threat_per_attempt","attempt_rate_runs"]),
-                x="attempt_rate_runs",
-                y="exp_threat_per_attempt",
-                tooltip=["player","team","exp_threat_per_attempt","attempt_rate_runs","threat_completed_pm"],
-                title="Risk–Reward: Attempts vs Value per Attempt",
-                width=chart_w, height=chart_h, point_size=point_size,
-                color_choice="None", highlights=highlight_players,
-            ).encode(color=alt.Color("dangerous_attempt_share:Q", title="Dangerous share", scale=alt.Scale(scheme='blues')))
+            chart2 = alt.Chart(df_view.dropna(subset=["exp_threat_per_attempt","attempt_rate_runs"])) \
+                .mark_circle(size=point_size) \
+                .encode(
+                    x=alt.X("attempt_rate_runs:Q", title="Attempt rate to runs"),
+                    y=alt.Y("exp_threat_per_attempt:Q", title="Expected threat per attempt"),
+                    tooltip=["player","team","exp_threat_per_attempt","attempt_rate_runs","threat_completed_pm"],
+                    color=alt.Color("dangerous_attempt_share:Q", title="Dangerous share", scale=alt.Scale(scheme='blues'))
+                ) \
+                .properties(width=chart_w, height=chart_h, title="Risk–Reward: Attempts vs Value per Attempt")
             st.altair_chart(chart2, use_container_width=True)
             st.download_button("Download HTML — Attempts vs Value per Attempt", chart2.to_html(), file_name="runs_attempts_vs_value_per_attempt.html")
 
-            chart3 = highlight_scatter(
-                df_view.dropna(subset=["dangerous_attempt_share","dangerous_completion"]),
-                x="dangerous_attempt_share",
-                y="dangerous_completion",
-                tooltip=["player","team","dangerous_attempt_share","dangerous_completion"],
-                title="Dangerous tendency vs execution",
-                width=chart_w, height=chart_h, point_size=point_size,
-                color_choice=color_choice, highlights=highlight_players
-            )
+            chart3 = alt.Chart(df_view.dropna(subset=["dangerous_attempt_share","dangerous_completion"])) \
+                .mark_circle(size=point_size) \
+                .encode(
+                    x=alt.X("dangerous_attempt_share:Q", title="Dangerous attempt share"),
+                    y=alt.Y("dangerous_completion:Q", title="Dangerous pass completion"),
+                    tooltip=["player","team","dangerous_attempt_share","dangerous_completion"],
+                )
+            chart3 = _apply_color(chart3).properties(width=chart_w, height=chart_h, title="Dangerous tendency vs execution")
             st.altair_chart(chart3, use_container_width=True)
             st.download_button("Download HTML — Dangerous tendency vs execution", chart3.to_html(), file_name="runs_dangerous_tendency_vs_execution.html")
 
@@ -425,9 +370,9 @@ with TAB_PRESS:
             st.markdown("### Filters")
             min_minutes_p = st.number_input("Min minutes per match", 0.0, value=0.0, step=1.0, key="press_minmins")
             teams_p = sorted([x for x in dfp["team"].dropna().unique()])
-            sel_teams_p = st.multiselect("Team(s)", options=teams_p, default=teams_p, key="press_team_multiselect")
-            sel_third_p = st.multiselect("Third(s)", options=sorted([x for x in dfp["third"].dropna().unique()]), key="press_third_multiselect")
-            sel_channel_p = st.multiselect("Channel(s)", options=sorted([x for x in dfp["channel"].dropna().unique()]), key="press_channel_multiselect")
+            sel_teams_p = st.multiselect("Team(s)", options=teams_p, default=teams_p)
+            sel_third_p = st.multiselect("Third(s)", options=sorted([x for x in dfp["third"].dropna().unique()]), key="press_third")
+            sel_channel_p = st.multiselect("Channel(s)", options=sorted([x for x in dfp["channel"].dropna().unique()]), key="press_channel")
 
             maskp = pd.Series(True, index=dfp.index)
             if not pd.isna(dfp["minutes_pm"]).all():
@@ -452,18 +397,44 @@ with TAB_PRESS:
             st.dataframe(leader_press.round(3), use_container_width=True)
             st.download_button("Download CSV — Under-pressure metrics", leader_press.to_csv(index=False).encode("utf-8"), file_name="under_pressure_metrics.csv")
 
-            # ---- Visualizations with highlight
+            # ---- Visualizations (TRIGGER view + highlights + big exports)
             st.markdown("### Visualizations")
             c1, c2, c3 = st.columns([1,1,1])
             with c1:
-                chart_w = st.number_input("Chart width (px)", 800, 4000, 1600, step=100, key="press_w")
+                chart_w = st.number_input("Chart width (px)", 800, 4000, 1700, step=100, key="press_w")
             with c2:
-                chart_h = st.number_input("Chart height (px)", 400, 2400, 900, step=50, key="press_h")
+                chart_h = st.number_input("Chart height (px)", 400, 2400, 950, step=50, key="press_h")
             with c3:
-                point_size = st.number_input("Point size", 20, 300, 90, step=5, key="press_pts")
+                size_max = st.number_input("Max point size", 40, 400, 160, step=10, key="press_size_max")
 
-            color_choice_p = st.selectbox("Color points by", ["team","third","channel","None"], index=0, key="press_color_choice")
+            color_choice_p = st.selectbox("Color points by (when not highlighting)", ["team","third","channel","None"], index=0, key="press_color_choice")
             highlight_players_p = st.multiselect("Highlight player(s)", options=sorted(dfp_view["player"].dropna().unique()), key="press_highlight_players")
+            show_labels = st.checkbox("Label highlighted players", value=True, key="press_label_highlight")
+
+            # Quick trigger thresholds (defaults around mid-range)
+            st.markdown("#### Trigger thresholds")
+            colt1, colt2, colt3 = st.columns(3)
+            with colt1:
+                theta_danger = st.slider("θ OPR_danger (max trigger)", 0.0, 1.0, 0.45, step=0.01, key="theta_danger")
+            with colt2:
+                theta_difficult = st.slider("θ OPR_difficult (max trigger)", 0.0, 1.0, 0.45, step=0.01, key="theta_difficult")
+            with colt3:
+                theta_forced = st.slider("θ forced-loss rate (min trigger)", 0.0, 1.0, 0.30, step=0.01, key="theta_forced")
+            only_triggers = st.checkbox("Show only trigger candidates (OPR_danger<θ & OPR_difficult<θ) OR forced_loss>θ", value=False, key="only_triggers")
+
+            base_df = dfp_view.copy()
+            if only_triggers:
+                base_df = base_df[( (base_df["OPR_danger"] < theta_danger) & (base_df["OPR_difficult"] < theta_difficult) ) | (base_df["forced_loss_rate_under_pressure"] > theta_forced )]
+
+            # Size by press load
+            size_enc = alt.Size('pressures_pm:Q', title='Press load (per match)', scale=alt.Scale(range=[40, size_max]))
+
+            def _apply_color_p(enc):
+                if color_choice_p != "None" and not highlight_players_p:
+                    if color_choice_p == "team":
+                        return enc.encode(color=alt.Color("team:N", scale=TEAM_COLOR_SCHEME, legend=alt.Legend(title="Team")))
+                    return enc.encode(color=alt.Color(f"{color_choice_p}:N"))
+                return enc
 
             def _save_html(chart, name):
                 return st.download_button(name, chart.to_html(), file_name=name.replace(" ", "_").lower())
@@ -471,50 +442,118 @@ with TAB_PRESS:
             choice = st.selectbox("Choose a visualization", [
                 "OPR vs Forced-loss rate",
                 "Pass-share under pressure vs Completion",
-                "OPR (danger) vs OPR (difficult)",
+                "OPR (danger) vs OPR (difficult) — Trigger view",
                 "Bar: Top OPR",
                 "Histogram: Forced-loss rate",
                 "Heatmap: Decision vs Completion",
             ], key="press_vis")
 
             if choice == "OPR vs Forced-loss rate":
-                c = highlight_scatter(
-                    dfp_view.dropna(subset=['OPR','forced_loss_rate_under_pressure']),
-                    x="forced_loss_rate_under_pressure",
-                    y="OPR",
-                    tooltip=['player','team','OPR','forced_loss_rate_under_pressure','pressures_pm','pass_att_press_pm'],
-                    title="Pressure resilience",
-                    width=chart_w, height=chart_h, point_size=point_size,
-                    color_choice=color_choice_p, highlights=highlight_players_p
-                )
+                c = alt.Chart(base_df.dropna(subset=['OPR','forced_loss_rate_under_pressure','pressures_pm']))\
+                    .mark_circle().encode(
+                        x=alt.X('forced_loss_rate_under_pressure:Q', title='Forced-loss rate (↓ better)'),
+                        y=alt.Y('OPR:Q', title='Overcome Pressure Rate (↑ better)'),
+                        size=size_enc,
+                        tooltip=['player','team','OPR','forced_loss_rate_under_pressure','pressures_pm','pass_att_press_pm']
+                    )
+                if highlight_players_p:
+                    # dim background
+                    bg = c.encode(color=alt.value("#bdbdbd"), opacity=alt.value(0.25))
+                    fg = c.transform_filter(alt.FieldOneOfPredicate(field="player", oneOf=highlight_players_p))\
+                        .encode(color=alt.Color('player:N', legend=alt.Legend(title="Highlighted"), scale=alt.Scale(scheme='tableau10', domain=highlight_players_p)))
+                    c = (bg + fg)
+                else:
+                    c = _apply_color_p(c)
+                c = c.properties(width=chart_w, height=chart_h, title="Pressure resilience")
+                if show_labels and highlight_players_p:
+                    labels = alt.Chart(base_df).transform_filter(alt.FieldOneOfPredicate(field="player", oneOf=highlight_players_p))\
+                        .mark_text(align='left', dx=7, dy=-7).encode(
+                            x='forced_loss_rate_under_pressure:Q', y='OPR:Q', text='player:N'
+                        )
+                    c = c + labels
                 st.altair_chart(c, use_container_width=True)
                 _save_html(c, "press_opr_vs_forcedloss.html")
 
             elif choice == "Pass-share under pressure vs Completion":
-                c = highlight_scatter(
-                    dfp_view.dropna(subset=['pass_share_under_pressure','comp_ratio_press']),
-                    x="pass_share_under_pressure",
-                    y="comp_ratio_press",
-                    tooltip=['player','team','pass_share_under_pressure','comp_ratio_press','OPR'],
-                    title="Style vs execution under pressure",
-                    width=chart_w, height=chart_h, point_size=point_size,
-                    color_choice=color_choice_p, highlights=highlight_players_p
-                )
+                c = alt.Chart(base_df.dropna(subset=['pass_share_under_pressure','comp_ratio_press','pressures_pm']))\
+                    .mark_circle().encode(
+                        x=alt.X('pass_share_under_pressure:Q', title='Pass share under pressure'),
+                        y=alt.Y('comp_ratio_press:Q', title='Pass completion under pressure'),
+                        size=size_enc,
+                        tooltip=['player','team','pass_share_under_pressure','comp_ratio_press','OPR']
+                    )
+                if highlight_players_p:
+                    bg = c.encode(color=alt.value("#bdbdbd"), opacity=alt.value(0.25))
+                    fg = c.transform_filter(alt.FieldOneOfPredicate(field="player", oneOf=highlight_players_p))\
+                        .encode(color=alt.Color('player:N', legend=alt.Legend(title="Highlighted"), scale=alt.Scale(scheme='tableau10', domain=highlight_players_p)))
+                    c = (bg + fg)
+                else:
+                    c = _apply_color_p(c)
+                c = c.properties(width=chart_w, height=chart_h, title="Style vs execution under pressure")
+                if show_labels and highlight_players_p:
+                    labels = alt.Chart(base_df).transform_filter(alt.FieldOneOfPredicate(field="player", oneOf=highlight_players_p))\
+                        .mark_text(align='left', dx=7, dy=-7).encode(
+                            x='pass_share_under_pressure:Q', y='comp_ratio_press:Q', text='player:N'
+                        )
+                    c = c + labels
                 st.altair_chart(c, use_container_width=True)
                 _save_html(c, "press_style_vs_execution.html")
 
-            elif choice == "OPR (danger) vs OPR (difficult)":
-                c = highlight_scatter(
-                    dfp_view.dropna(subset=['OPR_danger','OPR_difficult']),
-                    x="OPR_danger",
-                    y="OPR_difficult",
-                    tooltip=['player','team','OPR_danger','OPR_difficult','pressures_pm'],
-                    title="Value vs technical difficulty (under pressure)",
-                    width=chart_w, height=chart_h, point_size=point_size,
-                    color_choice=color_choice_p, highlights=highlight_players_p
+            elif choice == "OPR (danger) vs OPR (difficult) — Trigger view":
+                filtered = base_df.dropna(subset=['OPR_danger','OPR_difficult','pressures_pm'])
+
+                # Base scatter
+                scatter = alt.Chart(filtered).mark_circle().encode(
+                    x=alt.X('OPR_danger:Q', title='OPR (danger)'),
+                    y=alt.Y('OPR_difficult:Q', title='OPR (difficult)'),
+                    size=size_enc,
+                    tooltip=['player','team','OPR_danger','OPR_difficult','pressures_pm','forced_loss_rate_under_pressure']
                 )
+
+                # Background dim layer
+                if highlight_players_p:
+                    base_layer = scatter.encode(color=alt.value("#bdbdbd"), opacity=alt.value(0.25))
+                    hi_layer = scatter.transform_filter(alt.FieldOneOfPredicate(field="player", oneOf=highlight_players_p))\
+                        .encode(color=alt.Color('player:N', legend=alt.Legend(title="Highlighted"), scale=alt.Scale(scheme='tableau10', domain=highlight_players_p)))
+                    points = base_layer + hi_layer
+                else:
+                    points = _apply_color_p(scatter)
+
+                # y = x reference line
+                line_ref = alt.Chart(pd.DataFrame({'x':[0,1],'y':[0,1]})).mark_line(strokeDash=[6,6], opacity=0.6).encode(x='x:Q', y='y:Q')
+
+                # Quadrant shading using thresholds
+                quads = pd.DataFrame({
+                    'x0':[0, 0, theta_danger, theta_danger],
+                    'x1':[theta_danger, theta_danger, 1, 1],
+                    'y0':[0, theta_difficult, 0, theta_difficult],
+                    'y1':[theta_difficult, 1, theta_difficult, 1],
+                    'label':['SW — GO', 'NW — TRAP', 'SE — GO', 'NE — CAUTION'],
+                    'opacity':[0.10, 0.06, 0.08, 0.04],
+                    'color':['#d7301f','#3182bd','#31a354','#969696']
+                })
+                quad_layer = alt.Chart(quads).mark_rect().encode(
+                    x=alt.X('x0:Q'), x2='x1:Q', y=alt.Y('y0:Q'), y2='y1:Q',
+                    color=alt.Color('label:N', scale=alt.Scale(domain=quads['label'].tolist(), range=quads['color'].tolist()), legend=alt.Legend(title='Zones')),
+                    opacity='opacity:Q'
+                ).properties(opacity=0.15)
+
+                # Labels for highlighted
+                if show_labels and highlight_players_p:
+                    labels = alt.Chart(filtered).transform_filter(alt.FieldOneOfPredicate(field="player", oneOf=highlight_players_p))\
+                        .mark_text(align='left', dx=7, dy=-7).encode(
+                            x='OPR_danger:Q', y='OPR_difficult:Q', text='player:N'
+                        )
+                else:
+                    labels = None
+
+                c = quad_layer + line_ref + points
+                if labels is not None:
+                    c = c + labels
+                c = c.properties(width=chart_w, height=chart_h, title="OPR (danger) vs OPR (difficult) — Trigger view")
+
                 st.altair_chart(c, use_container_width=True)
-                _save_html(c, "press_opr_danger_vs_difficult.html")
+                _save_html(c, "press_opr_danger_vs_difficult_trigger.html")
 
             elif choice == "Bar: Top OPR":
                 df_bar = dfp_view.sort_values('OPR', ascending=False).head(15)
@@ -556,7 +595,7 @@ with TAB_PRESS:
             st.download_button("Download XLSX — Under Pressure module", bufp.getvalue(), file_name="under_pressure_module.xlsx")
 
 # ==================================
-# PLAYER RADAR TAB (integrated) — unchanged here
+# PLAYER RADAR TAB (integrated)
 # ==================================
 with TAB_RADAR:
     st.subheader("Player Radar")
@@ -566,7 +605,6 @@ with TAB_RADAR:
         st.info("Upload at least one CSV (Runs or Under Pressure) to use this tab.")
     else:
         pieces = []
-        # ---- RUNS aggregate (numeric-only aggregation to avoid TypeError)
         if not runs_df_raw.empty:
             take = [c for c in [
                 'Player','Team','team','player',
@@ -577,18 +615,13 @@ with TAB_RADAR:
                 tcol = 'Team' if 'Team' in runs_df_raw.columns else ('team' if 'team' in runs_df_raw.columns else None)
                 pcol = 'Player' if 'Player' in runs_df_raw.columns else 'player'
                 g = runs_df_raw[take].copy()
-                # standardize team label
                 if tcol and tcol not in g.columns and 'team' in g.columns:
                     tcol = 'team'
-                g['team'] = g[tcol] if (tcol in g.columns) else np.nan
-                # numeric-only columns for aggregation
-                num_cols = g.select_dtypes(include='number').columns.tolist()
-                if len(num_cols) > 0:
-                    g_agg = g.groupby([pcol,'team'])[num_cols].agg(['sum','mean']).reset_index()
-                    g_agg.columns = [" ".join(col).strip() if isinstance(col, tuple) else col for col in g_agg.columns.to_flat_index()]
-                    g_agg = g_agg.rename(columns={pcol:'player'})
-                    pieces.append(g_agg)
-        # ---- PRESS aggregate (numeric-only)
+                g['team'] = g[tcol] if tcol in g.columns else np.nan
+                g = g.groupby([pcol,'team']).agg(['sum','mean'])
+                g.columns = [" ".join(col).strip() for col in g.columns.to_flat_index()]
+                g = g.reset_index().rename(columns={pcol:'player'})
+                pieces.append(g)
         if not press_df_raw.empty:
             takep = [c for c in [
                 'Player','Team','team','player',
@@ -598,16 +631,13 @@ with TAB_RADAR:
                 tcol = 'Team' if 'Team' in press_df_raw.columns else ('team' if 'team' in press_df_raw.columns else None)
                 pcol = 'Player' if 'Player' in press_df_raw.columns else 'player'
                 gp = press_df_raw[takep].copy()
-                gp['team'] = gp[tcol] if (tcol in gp.columns) else np.nan
-                num_cols_p = gp.select_dtypes(include='number').columns.tolist()
-                if len(num_cols_p) > 0:
-                    gp_agg = gp.groupby([pcol,'team'])[num_cols_p].agg(['sum','mean']).reset_index()
-                    gp_agg.columns = [" ".join(col).strip() if isinstance(col, tuple) else col for col in gp_agg.columns.to_flat_index()]
-                    gp_agg = gp_agg.rename(columns={pcol:'player'})
-                    pieces.append(gp_agg)
-
+                gp['team'] = gp[tcol] if tcol in gp.columns else np.nan
+                gp = gp.groupby([pcol,'team']).agg(['sum','mean'])
+                gp.columns = [" ".join(col).strip() for col in gp.columns.to_flat_index()]
+                gp = gp.reset_index().rename(columns={pcol:'player'})
+                pieces.append(gp)
         if not pieces:
-            st.warning("Could not form per-player aggregates from your CSVs. Ensure 'Player' and numeric metrics exist.")
+            st.warning("Could not form per-player aggregates from your CSVs. Ensure 'Player' column exists.")
         else:
             dfp = pieces[0]
             for p in pieces[1:]:
@@ -625,27 +655,22 @@ with TAB_RADAR:
 
             candidate_cols = [c for c in dfp.columns if any(k in c.lower() for k in ['opr','threat','completion','completed passes for runs per match sum','pass attempts under pressure per match sum'])]
             for c in candidate_cols:
-                try:
-                    dfp[c+"_n"] = norm01(dfp[c])
-                except Exception:
-                    pass
+                dfp[c+"_n"] = norm01(dfp[c])
 
             teams_all = [t for t in sorted(dfp['team'].dropna().unique())]
-            team_sel = st.selectbox('Team filter (optional)', ['— All —'] + teams_all, key="radar_team_filter")
+            team_sel = st.selectbox('Team filter (optional)', ['— All —'] + teams_all)
             dfp_view = dfp if team_sel == '— All —' else dfp[dfp['team'] == team_sel]
 
             players = sorted(dfp_view['player'].dropna().unique().tolist())
-            if len(players) == 0:
-                st.warning("No players available after aggregation.")
+            if not players:
+                st.warning("No players available after filters.")
             else:
-                p1 = st.selectbox('Player A', players, key="radar_player_a")
-                p2 = st.selectbox('Player B (optional)', ['—'] + players, key="radar_player_b")
+                p1 = st.selectbox('Player A', players)
+                p2 = st.selectbox('Player B (optional)', ['—'] + players)
                 p2 = None if p2 == '—' else p2
 
-                metric_options = [c for c in dfp_view.columns if c.endswith('_n')]
-                default_metrics = metric_options[:8] if len(metric_options) >= 3 else metric_options
-                metrics_sel = st.multiselect('Radar metrics (3–12)', options=metric_options,
-                                             default=default_metrics, key="radar_metrics_sel")
+                metrics_sel = st.multiselect('Radar metrics (3–12)', options=[c for c in dfp_view.columns if c.endswith('_n')],
+                                             default=[c for c in dfp_view.columns if c.endswith('_n')][:8])
                 if len(metrics_sel) < 3:
                     st.info("Select at least 3 metrics.")
                 else:
@@ -683,10 +708,10 @@ with TAB_RADAR:
                         colp1, colp2 = st.columns(2)
                         with colp1:
                             buf_png = io.BytesIO(); fig.savefig(buf_png, format='png', dpi=300, bbox_inches='tight'); buf_png.seek(0)
-                            st.download_button('Download Radar (PNG)', buf_png.getvalue(), file_name='player_radar.png', key="radar_png_dl")
+                            st.download_button('Download Radar (PNG)', buf_png.getvalue(), file_name='player_radar.png')
                         with colp2:
                             buf_pdf = io.BytesIO(); fig.savefig(buf_pdf, format='pdf', bbox_inches='tight'); buf_pdf.seek(0)
-                            st.download_button('Download Radar (PDF)', buf_pdf.getvalue(), file_name='player_radar.pdf', key="radar_pdf_dl")
+                            st.download_button('Download Radar (PDF)', buf_pdf.getvalue(), file_name='player_radar.pdf')
                     except Exception as e:
                         st.error(f"Radar plotting requires matplotlib + mplsoccer. Error: {e}")
 
@@ -697,17 +722,9 @@ with TAB_NOTES:
     st.subheader("About this app & methods")
     st.markdown(
         """
+        **Under Pressure → Trigger view** adds: y=x reference line, quadrant shading with adjustable thresholds, point size = press load, quick trigger filter, and a labels toggle for highlighted players.
         **Runs module** adds: *expected threat per attempt*, *dangerous attempt share*, and an updated **Creator Index v2**.
         **Under Pressure module** adds: *throughput of successful passes* and a **safe action rate**.
-
-        **Highlighting**: use the **Highlight player(s)** control to spotlight one or more players. Non-highlighted points are greyed out (soft opacity), and highlighted players get larger markers with a black outline.
-
-        **Quality exports**: every Altair chart has **width/height controls** for larger, sharper standalone HTML. Team coloring uses a Tableau palette.
-
-        **References (non-exhaustive)**
-        - Merlin et al. (2022) — determinants of pass difficulty (receiver, trajectory, zones, passer).
-        - Anzer & Bauer (2022) — Expected Passes models.
-        - Fernández, Bornn & Cervone (2019/2021) — EPV concepts.
 
         All charts are interactive (hover) and downloadable as standalone HTML; tables and leaderboards export to XLSX.
         """
