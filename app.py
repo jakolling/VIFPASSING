@@ -2,7 +2,7 @@
 # Author: GPT-5 Thinking
 # How to run:
 #   1) pip install -r requirements.txt
-#   2) streamlit run app_skillcorner_integrated.py
+#   2) streamlit run app_skillcorner_integrated_fix_groupby.py
 
 from __future__ import annotations
 import io
@@ -47,11 +47,11 @@ def load_csv(file: io.BytesIO, semicolon: bool, comma_decimal: bool) -> pd.DataF
         return pd.read_csv(file, sep=sep)
 
 # ----------------------------------
-# Canonical columns
+# Canonical columns (TEAM/Team/team supported)
 # ----------------------------------
 RUNS_EXPECTED: Dict[str, list[str]] = {
     "player": ["player", "name", "Player"],
-    "team": ["team", "club", "squad"],
+    "team": ["team", "Team", "TEAM", "club", "squad"],
     "third": ["third", "third of the pitch", "zone third"],
     "channel": ["channel", "lane", "corridor"],
     "minutes_pm": ["minutes played per match", "mins per match", "minutes/match"],
@@ -69,7 +69,7 @@ RUNS_EXPECTED: Dict[str, list[str]] = {
 
 PRESS_EXPECTED: Dict[str, list[str]] = {
     "player": ["player", "name", "Player"],
-    "team": ["team", "club", "squad"],
+    "team": ["team", "Team", "TEAM", "club", "squad"],
     "third": ["third"],
     "channel": ["channel"],
     "minutes_pm": ["minutes played per match"],
@@ -82,27 +82,19 @@ PRESS_EXPECTED: Dict[str, list[str]] = {
     "forced_losses_press_pm": ["count forced losses under pressure per match"],
 }
 
-DEFAULT_WEIGHTS_RUNS = {
-    "threat_completed_pm": 0.30,
-    "completed_runs_pm": 0.20,
-    "comp_ratio_runs": 0.20,
-    "attempt_rate_runs": 0.20,
-    "conversion_to_shot": 0.10,
-}
-
 TEAM_COLOR_SCHEME = alt.Scale(scheme="tableau20")
 
 # ----------------------------------
-# Sidebar — input
+# Sidebar — input (unique keys to avoid duplicates)
 # ----------------------------------
 
 st.sidebar.header("1) Upload CSVs")
-runs_file = st.sidebar.file_uploader("Upload RUNS CSV (player-level)", type=["csv"], key="runs")
-press_file = st.sidebar.file_uploader("Upload UNDER PRESSURE CSV (player-level)", type=["csv"], key="press")
+runs_file = st.sidebar.file_uploader("Upload RUNS CSV (player-level)", type=["csv"], key="runs_uploader")
+press_file = st.sidebar.file_uploader("Upload UNDER PRESSURE CSV (player-level)", type=["csv"], key="press_uploader")
 
 st.sidebar.subheader("Delimiter & decimal")
-use_semicolon = st.sidebar.checkbox("CSV uses semicolon (;) as delimiter", value=True)
-use_comma_decimal = st.sidebar.checkbox("Numbers use comma as decimal (e.g., 12,3)", value=False)
+use_semicolon = st.sidebar.checkbox("CSV uses semicolon (;) as delimiter", value=True, key="delim_semicolon")
+use_comma_decimal = st.sidebar.checkbox("Numbers use comma as decimal (e.g., 12,3)", value=False, key="decimal_comma")
 
 runs_df_raw = load_csv(runs_file, use_semicolon, use_comma_decimal)
 press_df_raw = load_csv(press_file, use_semicolon, use_comma_decimal)
@@ -196,13 +188,13 @@ with TAB_RUNS:
                 + 0.15*df["p_attempt_rate_runs"] + 0.10*df["p_dangerous_completion"]
             )
 
-            # ---- Filters
+            # ---- Filters (unique keys)
             st.markdown("### Filters")
-            min_minutes = st.number_input("Min minutes per match", 0.0, value=0.0, step=1.0)
+            min_minutes = st.number_input("Min minutes per match", 0.0, value=0.0, step=1.0, key="runs_min_minutes")
             teams = sorted([x for x in df["team"].dropna().unique()])
-            sel_teams = st.multiselect("Team(s)", options=teams, default=teams)
-            sel_third = st.multiselect("Third(s)", options=sorted([x for x in df["third"].dropna().unique()]))
-            sel_channel = st.multiselect("Channel(s)", options=sorted([x for x in df["channel"].dropna().unique()]))
+            sel_teams = st.multiselect("Team(s)", options=teams, default=teams, key="runs_team_multiselect")
+            sel_third = st.multiselect("Third(s)", options=sorted([x for x in df["third"].dropna().unique()]), key="runs_third_multiselect")
+            sel_channel = st.multiselect("Channel(s)", options=sorted([x for x in df["channel"].dropna().unique()]), key="runs_channel_multiselect")
 
             mask = pd.Series(True, index=df.index)
             if not pd.isna(df["minutes_pm"]).all():
@@ -374,13 +366,13 @@ with TAB_PRESS:
             for col in bench_cols:
                 dfp[f'p_{col}'] = pct(dfp[col])
 
-            # ---- Filters
+            # ---- Filters (unique keys)
             st.markdown("### Filters")
             min_minutes_p = st.number_input("Min minutes per match", 0.0, value=0.0, step=1.0, key="press_minmins")
             teams_p = sorted([x for x in dfp["team"].dropna().unique()])
-            sel_teams_p = st.multiselect("Team(s)", options=teams_p, default=teams_p)
-            sel_third_p = st.multiselect("Third(s)", options=sorted([x for x in dfp["third"].dropna().unique()]), key="press_third")
-            sel_channel_p = st.multiselect("Channel(s)", options=sorted([x for x in dfp["channel"].dropna().unique()]), key="press_channel")
+            sel_teams_p = st.multiselect("Team(s)", options=teams_p, default=teams_p, key="press_team_multiselect")
+            sel_third_p = st.multiselect("Third(s)", options=sorted([x for x in dfp["third"].dropna().unique()]), key="press_third_multiselect")
+            sel_channel_p = st.multiselect("Channel(s)", options=sorted([x for x in dfp["channel"].dropna().unique()]), key="press_channel_multiselect")
 
             maskp = pd.Series(True, index=dfp.index)
             if not pd.isna(dfp["minutes_pm"]).all():
@@ -509,7 +501,7 @@ with TAB_PRESS:
             st.download_button("Download XLSX — Under Pressure module", bufp.getvalue(), file_name="under_pressure_module.xlsx")
 
 # ==================================
-# PLAYER RADAR TAB (integrated)
+# PLAYER RADAR TAB (integrated) — FIXED groupby/agg to numeric only
 # ==================================
 with TAB_RADAR:
     st.subheader("Player Radar")
@@ -519,6 +511,7 @@ with TAB_RADAR:
         st.info("Upload at least one CSV (Runs or Under Pressure) to use this tab.")
     else:
         pieces = []
+        # ---- RUNS aggregate (numeric-only aggregation to avoid TypeError)
         if not runs_df_raw.empty:
             take = [c for c in [
                 'Player','Team','team','player',
@@ -529,13 +522,18 @@ with TAB_RADAR:
                 tcol = 'Team' if 'Team' in runs_df_raw.columns else ('team' if 'team' in runs_df_raw.columns else None)
                 pcol = 'Player' if 'Player' in runs_df_raw.columns else 'player'
                 g = runs_df_raw[take].copy()
+                # standardize team label
                 if tcol and tcol not in g.columns and 'team' in g.columns:
                     tcol = 'team'
-                g['team'] = g[tcol] if tcol in g.columns else np.nan
-                g = g.groupby([pcol,'team']).agg(['sum','mean'])
-                g.columns = [" ".join(col).strip() for col in g.columns.to_flat_index()]
-                g = g.reset_index().rename(columns={pcol:'player'})
-                pieces.append(g)
+                g['team'] = g[tcol] if (tcol in g.columns) else np.nan
+                # numeric-only columns for aggregation
+                num_cols = g.select_dtypes(include='number').columns.tolist()
+                if len(num_cols) > 0:
+                    g_agg = g.groupby([pcol,'team'])[num_cols].agg(['sum','mean']).reset_index()
+                    g_agg.columns = [" ".join(col).strip() if isinstance(col, tuple) else col for col in g_agg.columns.to_flat_index()]
+                    g_agg = g_agg.rename(columns={pcol:'player'})
+                    pieces.append(g_agg)
+        # ---- PRESS aggregate (numeric-only)
         if not press_df_raw.empty:
             takep = [c for c in [
                 'Player','Team','team','player',
@@ -545,13 +543,16 @@ with TAB_RADAR:
                 tcol = 'Team' if 'Team' in press_df_raw.columns else ('team' if 'team' in press_df_raw.columns else None)
                 pcol = 'Player' if 'Player' in press_df_raw.columns else 'player'
                 gp = press_df_raw[takep].copy()
-                gp['team'] = gp[tcol] if tcol in gp.columns else np.nan
-                gp = gp.groupby([pcol,'team']).agg(['sum','mean'])
-                gp.columns = [" ".join(col).strip() for col in gp.columns.to_flat_index()]
-                gp = gp.reset_index().rename(columns={pcol:'player'})
-                pieces.append(gp)
+                gp['team'] = gp[tcol] if (tcol in gp.columns) else np.nan
+                num_cols_p = gp.select_dtypes(include='number').columns.tolist()
+                if len(num_cols_p) > 0:
+                    gp_agg = gp.groupby([pcol,'team'])[num_cols_p].agg(['sum','mean']).reset_index()
+                    gp_agg.columns = [" ".join(col).strip() if isinstance(col, tuple) else col for col in gp_agg.columns.to_flat_index()]
+                    gp_agg = gp_agg.rename(columns={pcol:'player'})
+                    pieces.append(gp_agg)
+
         if not pieces:
-            st.warning("Could not form per-player aggregates from your CSVs. Ensure 'Player' column exists.")
+            st.warning("Could not form per-player aggregates from your CSVs. Ensure 'Player' and numeric metrics exist.")
         else:
             dfp = pieces[0]
             for p in pieces[1:]:
@@ -569,62 +570,70 @@ with TAB_RADAR:
 
             candidate_cols = [c for c in dfp.columns if any(k in c.lower() for k in ['opr','threat','completion','completed passes for runs per match sum','pass attempts under pressure per match sum'])]
             for c in candidate_cols:
-                dfp[c+"_n"] = norm01(dfp[c])
+                try:
+                    dfp[c+"_n"] = norm01(dfp[c])
+                except Exception:
+                    pass
 
             teams_all = [t for t in sorted(dfp['team'].dropna().unique())]
-            team_sel = st.selectbox('Team filter (optional)', ['— All —'] + teams_all)
+            team_sel = st.selectbox('Team filter (optional)', ['— All —'] + teams_all, key="radar_team_filter")
             dfp_view = dfp if team_sel == '— All —' else dfp[dfp['team'] == team_sel]
 
             players = sorted(dfp_view['player'].dropna().unique().tolist())
-            p1 = st.selectbox('Player A', players)
-            p2 = st.selectbox('Player B (optional)', ['—'] + players)
-            p2 = None if p2 == '—' else p2
-
-            metrics_sel = st.multiselect('Radar metrics (3–12)', options=[c for c in dfp_view.columns if c.endswith('_n')],
-                                         default=[c for c in dfp_view.columns if c.endswith('_n')][:8])
-            if len(metrics_sel) < 3:
-                st.info("Select at least 3 metrics.")
+            if len(players) == 0:
+                st.warning("No players available after aggregation.")
             else:
-                try:
-                    plt = importlib.import_module('matplotlib.pyplot')
-                    Radar = getattr(importlib.import_module('mplsoccer'), 'Radar')
-                    lowers, uppers = [], []
-                    for m in metrics_sel:
-                        s = pd.to_numeric(dfp_view[m], errors='coerce')
-                        lo = float(np.nanpercentile(s, 5)); hi = float(np.nanpercentile(s, 95))
-                        if not np.isfinite(lo) or not np.isfinite(hi) or hi == lo:
-                            lo, hi = float(np.nanmin(s)), float(np.nanmax(s))
-                            if hi == lo:
-                                hi = lo + 1e-6
-                        lowers.append(lo); uppers.append(hi)
-                    radar = Radar(metrics_sel, lowers, uppers, num_rings=4)
-                    v_a = [float(dfp_view.loc[dfp_view['player']==p1, m].iloc[0]) for m in metrics_sel]
-                    v_b = [float(dfp_view.loc[dfp_view['player']==p2, m].iloc[0]) for m in metrics_sel] if p2 else None
-                    fig, ax = plt.subplots(figsize=(9.5,9.5))
-                    radar.setup_axis(ax=ax)
-                    radar.draw_circles(ax=ax, facecolor="#f3f3f3", edgecolor="#c9c9c9", alpha=0.18)
-                    try:
-                        radar.spoke(ax=ax, color="#c9c9c9", linestyle="--", alpha=0.18)
-                    except Exception:
-                        pass
-                    radar.draw_radar(v_a, ax=ax, kwargs_radar={"facecolor":"#2A9D8F33","edgecolor":"#2A9D8F","linewidth":2})
-                    if v_b is not None:
-                        radar.draw_radar(v_b, ax=ax, kwargs_radar={"facecolor":"#E76F5133","edgecolor":"#E76F51","linewidth":2})
-                    radar.draw_range_labels(ax=ax, fontsize=10)
-                    radar.draw_param_labels(ax=ax, fontsize=11)
-                    subtitle = team_sel if team_sel != '— All —' else 'All teams'
-                    ax.set_title((p1 if p2 is None else f"{p1} vs {p2}") + f" — {subtitle}", fontsize=16, pad=18)
-                    st.pyplot(fig, use_container_width=True)
+                p1 = st.selectbox('Player A', players, key="radar_player_a")
+                p2 = st.selectbox('Player B (optional)', ['—'] + players, key="radar_player_b")
+                p2 = None if p2 == '—' else p2
 
-                    colp1, colp2 = st.columns(2)
-                    with colp1:
-                        buf_png = io.BytesIO(); fig.savefig(buf_png, format='png', dpi=300, bbox_inches='tight'); buf_png.seek(0)
-                        st.download_button('Download Radar (PNG)', buf_png.getvalue(), file_name='player_radar.png')
-                    with colp2:
-                        buf_pdf = io.BytesIO(); fig.savefig(buf_pdf, format='pdf', bbox_inches='tight'); buf_pdf.seek(0)
-                        st.download_button('Download Radar (PDF)', buf_pdf.getvalue(), file_name='player_radar.pdf')
-                except Exception as e:
-                    st.error(f"Radar plotting requires matplotlib + mplsoccer. Error: {e}")
+                metric_options = [c for c in dfp_view.columns if c.endswith('_n')]
+                default_metrics = metric_options[:8] if len(metric_options) >= 3 else metric_options
+                metrics_sel = st.multiselect('Radar metrics (3–12)', options=metric_options,
+                                             default=default_metrics, key="radar_metrics_sel")
+                if len(metrics_sel) < 3:
+                    st.info("Select at least 3 metrics.")
+                else:
+                    try:
+                        plt = importlib.import_module('matplotlib.pyplot')
+                        Radar = getattr(importlib.import_module('mplsoccer'), 'Radar')
+                        lowers, uppers = [], []
+                        for m in metrics_sel:
+                            s = pd.to_numeric(dfp_view[m], errors='coerce')
+                            lo = float(np.nanpercentile(s, 5)); hi = float(np.nanpercentile(s, 95))
+                            if not np.isfinite(lo) or not np.isfinite(hi) or hi == lo:
+                                lo, hi = float(np.nanmin(s)), float(np.nanmax(s))
+                                if hi == lo:
+                                    hi = lo + 1e-6
+                            lowers.append(lo); uppers.append(hi)
+                        radar = Radar(metrics_sel, lowers, uppers, num_rings=4)
+                        v_a = [float(dfp_view.loc[dfp_view['player']==p1, m].iloc[0]) for m in metrics_sel]
+                        v_b = [float(dfp_view.loc[dfp_view['player']==p2, m].iloc[0]) for m in metrics_sel] if p2 else None
+                        fig, ax = plt.subplots(figsize=(9.5,9.5))
+                        radar.setup_axis(ax=ax)
+                        radar.draw_circles(ax=ax, facecolor="#f3f3f3", edgecolor="#c9c9c9", alpha=0.18)
+                        try:
+                            radar.spoke(ax=ax, color="#c9c9c9", linestyle="--", alpha=0.18)
+                        except Exception:
+                            pass
+                        radar.draw_radar(v_a, ax=ax, kwargs_radar={"facecolor":"#2A9D8F33","edgecolor":"#2A9D8F","linewidth":2})
+                        if v_b is not None:
+                            radar.draw_radar(v_b, ax=ax, kwargs_radar={"facecolor":"#E76F5133","edgecolor":"#E76F51","linewidth":2})
+                        radar.draw_range_labels(ax=ax, fontsize=10)
+                        radar.draw_param_labels(ax=ax, fontsize=11)
+                        subtitle = team_sel if team_sel != '— All —' else 'All teams'
+                        ax.set_title((p1 if p2 is None else f"{p1} vs {p2}") + f" — {subtitle}", fontsize=16, pad=18)
+                        st.pyplot(fig, use_container_width=True)
+
+                        colp1, colp2 = st.columns(2)
+                        with colp1:
+                            buf_png = io.BytesIO(); fig.savefig(buf_png, format='png', dpi=300, bbox_inches='tight'); buf_png.seek(0)
+                            st.download_button('Download Radar (PNG)', buf_png.getvalue(), file_name='player_radar.png', key="radar_png_dl")
+                        with colp2:
+                            buf_pdf = io.BytesIO(); fig.savefig(buf_pdf, format='pdf', bbox_inches='tight'); buf_pdf.seek(0)
+                            st.download_button('Download Radar (PDF)', buf_pdf.getvalue(), file_name='player_radar.pdf', key="radar_pdf_dl")
+                    except Exception as e:
+                        st.error(f"Radar plotting requires matplotlib + mplsoccer. Error: {e}")
 
 # ==================================
 # ABOUT
@@ -636,7 +645,7 @@ with TAB_NOTES:
         **Runs module** adds: *expected threat per attempt*, *dangerous attempt share*, and an updated **Creator Index v2**.
         **Under Pressure module** adds: *throughput of successful passes* and a **safe action rate**.
 
-        **Quality exports**: every Altair chart now has **width/height controls** and larger default sizes, so your **HTML exports are bigger and sharper**. Team coloring is consistent using a Tableau palette.
+        **Quality exports**: every Altair chart has **width/height controls** for larger, sharper standalone HTML. Team coloring uses a Tableau palette.
 
         **References (non-exhaustive)**
         - Merlin et al. (2022) — determinants of pass difficulty (receiver, trajectory, zones, passer).
