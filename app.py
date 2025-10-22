@@ -46,8 +46,6 @@ def load_csv(file: io.BytesIO, semicolon: bool, comma_decimal: bool) -> pd.DataF
         file.seek(0)
         return pd.read_csv(file, sep=sep)
 
-TEAM_COLOR_SCHEME = alt.Scale(scheme="tableau20")
-
 # ----------------------------------
 # Canonical columns
 # ----------------------------------
@@ -83,6 +81,16 @@ PRESS_EXPECTED: Dict[str, list[str]] = {
     "retentions_press_pm": ["count ball retentions under pressure per match"],
     "forced_losses_press_pm": ["count forced losses under pressure per match"],
 }
+
+DEFAULT_WEIGHTS_RUNS = {
+    "threat_completed_pm": 0.30,
+    "completed_runs_pm": 0.20,
+    "comp_ratio_runs": 0.20,
+    "attempt_rate_runs": 0.20,
+    "conversion_to_shot": 0.10,
+}
+
+TEAM_COLOR_SCHEME = alt.Scale(scheme="tableau20")
 
 # ----------------------------------
 # Sidebar — input
@@ -397,40 +405,20 @@ with TAB_PRESS:
             st.dataframe(leader_press.round(3), use_container_width=True)
             st.download_button("Download CSV — Under-pressure metrics", leader_press.to_csv(index=False).encode("utf-8"), file_name="under_pressure_metrics.csv")
 
-            # ---- Visualizations (TRIGGER view + highlights + big exports)
+            # ---- Visualizations (bigger HTML + team colors)
             st.markdown("### Visualizations")
             c1, c2, c3 = st.columns([1,1,1])
             with c1:
-                chart_w = st.number_input("Chart width (px)", 800, 4000, 1700, step=100, key="press_w")
+                chart_w = st.number_input("Chart width (px)", 800, 4000, 1600, step=100, key="press_w")
             with c2:
-                chart_h = st.number_input("Chart height (px)", 400, 2400, 950, step=50, key="press_h")
+                chart_h = st.number_input("Chart height (px)", 400, 2400, 900, step=50, key="press_h")
             with c3:
-                size_max = st.number_input("Max point size", 40, 400, 160, step=10, key="press_size_max")
+                point_size = st.number_input("Point size", 20, 300, 90, step=5, key="press_pts")
 
-            color_choice_p = st.selectbox("Color points by (when not highlighting)", ["team","third","channel","None"], index=0, key="press_color_choice")
-            highlight_players_p = st.multiselect("Highlight player(s)", options=sorted(dfp_view["player"].dropna().unique()), key="press_highlight_players")
-            show_labels = st.checkbox("Label highlighted players", value=True, key="press_label_highlight")
-
-            # Quick trigger thresholds (defaults around mid-range)
-            st.markdown("#### Trigger thresholds")
-            colt1, colt2, colt3 = st.columns(3)
-            with colt1:
-                theta_danger = st.slider("θ OPR_danger (max trigger)", 0.0, 1.0, 0.45, step=0.01, key="theta_danger")
-            with colt2:
-                theta_difficult = st.slider("θ OPR_difficult (max trigger)", 0.0, 1.0, 0.45, step=0.01, key="theta_difficult")
-            with colt3:
-                theta_forced = st.slider("θ forced-loss rate (min trigger)", 0.0, 1.0, 0.30, step=0.01, key="theta_forced")
-            only_triggers = st.checkbox("Show only trigger candidates (OPR_danger<θ & OPR_difficult<θ) OR forced_loss>θ", value=False, key="only_triggers")
-
-            base_df = dfp_view.copy()
-            if only_triggers:
-                base_df = base_df[( (base_df["OPR_danger"] < theta_danger) & (base_df["OPR_difficult"] < theta_difficult) ) | (base_df["forced_loss_rate_under_pressure"] > theta_forced )]
-
-            # Size by press load
-            size_enc = alt.Size('pressures_pm:Q', title='Press load (per match)', scale=alt.Scale(range=[40, size_max]))
+            color_choice_p = st.selectbox("Color points by", ["team","third","channel","None"], index=0, key="press_color_choice")
 
             def _apply_color_p(enc):
-                if color_choice_p != "None" and not highlight_players_p:
+                if color_choice_p != "None":
                     if color_choice_p == "team":
                         return enc.encode(color=alt.Color("team:N", scale=TEAM_COLOR_SCHEME, legend=alt.Legend(title="Team")))
                     return enc.encode(color=alt.Color(f"{color_choice_p}:N"))
@@ -442,118 +430,44 @@ with TAB_PRESS:
             choice = st.selectbox("Choose a visualization", [
                 "OPR vs Forced-loss rate",
                 "Pass-share under pressure vs Completion",
-                "OPR (danger) vs OPR (difficult) — Trigger view",
+                "OPR (danger) vs OPR (difficult)",
                 "Bar: Top OPR",
                 "Histogram: Forced-loss rate",
                 "Heatmap: Decision vs Completion",
             ], key="press_vis")
 
             if choice == "OPR vs Forced-loss rate":
-                c = alt.Chart(base_df.dropna(subset=['OPR','forced_loss_rate_under_pressure','pressures_pm']))\
-                    .mark_circle().encode(
+                c = alt.Chart(dfp_view.dropna(subset=['OPR','forced_loss_rate_under_pressure']))\
+                    .mark_circle(size=point_size).encode(
                         x=alt.X('forced_loss_rate_under_pressure:Q', title='Forced-loss rate (↓ better)'),
                         y=alt.Y('OPR:Q', title='Overcome Pressure Rate (↑ better)'),
-                        size=size_enc,
                         tooltip=['player','team','OPR','forced_loss_rate_under_pressure','pressures_pm','pass_att_press_pm']
                     )
-                if highlight_players_p:
-                    # dim background
-                    bg = c.encode(color=alt.value("#bdbdbd"), opacity=alt.value(0.25))
-                    fg = c.transform_filter(alt.FieldOneOfPredicate(field="player", oneOf=highlight_players_p))\
-                        .encode(color=alt.Color('player:N', legend=alt.Legend(title="Highlighted"), scale=alt.Scale(scheme='tableau10', domain=highlight_players_p)))
-                    c = (bg + fg)
-                else:
-                    c = _apply_color_p(c)
-                c = c.properties(width=chart_w, height=chart_h, title="Pressure resilience")
-                if show_labels and highlight_players_p:
-                    labels = alt.Chart(base_df).transform_filter(alt.FieldOneOfPredicate(field="player", oneOf=highlight_players_p))\
-                        .mark_text(align='left', dx=7, dy=-7).encode(
-                            x='forced_loss_rate_under_pressure:Q', y='OPR:Q', text='player:N'
-                        )
-                    c = c + labels
+                c = _apply_color_p(c).properties(width=chart_w, height=chart_h, title="Pressure resilience")
                 st.altair_chart(c, use_container_width=True)
                 _save_html(c, "press_opr_vs_forcedloss.html")
 
             elif choice == "Pass-share under pressure vs Completion":
-                c = alt.Chart(base_df.dropna(subset=['pass_share_under_pressure','comp_ratio_press','pressures_pm']))\
-                    .mark_circle().encode(
+                c = alt.Chart(dfp_view.dropna(subset=['pass_share_under_pressure','comp_ratio_press']))\
+                    .mark_circle(size=point_size).encode(
                         x=alt.X('pass_share_under_pressure:Q', title='Pass share under pressure'),
                         y=alt.Y('comp_ratio_press:Q', title='Pass completion under pressure'),
-                        size=size_enc,
                         tooltip=['player','team','pass_share_under_pressure','comp_ratio_press','OPR']
                     )
-                if highlight_players_p:
-                    bg = c.encode(color=alt.value("#bdbdbd"), opacity=alt.value(0.25))
-                    fg = c.transform_filter(alt.FieldOneOfPredicate(field="player", oneOf=highlight_players_p))\
-                        .encode(color=alt.Color('player:N', legend=alt.Legend(title="Highlighted"), scale=alt.Scale(scheme='tableau10', domain=highlight_players_p)))
-                    c = (bg + fg)
-                else:
-                    c = _apply_color_p(c)
-                c = c.properties(width=chart_w, height=chart_h, title="Style vs execution under pressure")
-                if show_labels and highlight_players_p:
-                    labels = alt.Chart(base_df).transform_filter(alt.FieldOneOfPredicate(field="player", oneOf=highlight_players_p))\
-                        .mark_text(align='left', dx=7, dy=-7).encode(
-                            x='pass_share_under_pressure:Q', y='comp_ratio_press:Q', text='player:N'
-                        )
-                    c = c + labels
+                c = _apply_color_p(c).properties(width=chart_w, height=chart_h, title="Style vs execution under pressure")
                 st.altair_chart(c, use_container_width=True)
                 _save_html(c, "press_style_vs_execution.html")
 
-            elif choice == "OPR (danger) vs OPR (difficult) — Trigger view":
-                filtered = base_df.dropna(subset=['OPR_danger','OPR_difficult','pressures_pm'])
-
-                # Base scatter
-                scatter = alt.Chart(filtered).mark_circle().encode(
-                    x=alt.X('OPR_danger:Q', title='OPR (danger)'),
-                    y=alt.Y('OPR_difficult:Q', title='OPR (difficult)'),
-                    size=size_enc,
-                    tooltip=['player','team','OPR_danger','OPR_difficult','pressures_pm','forced_loss_rate_under_pressure']
-                )
-
-                # Background dim layer
-                if highlight_players_p:
-                    base_layer = scatter.encode(color=alt.value("#bdbdbd"), opacity=alt.value(0.25))
-                    hi_layer = scatter.transform_filter(alt.FieldOneOfPredicate(field="player", oneOf=highlight_players_p))\
-                        .encode(color=alt.Color('player:N', legend=alt.Legend(title="Highlighted"), scale=alt.Scale(scheme='tableau10', domain=highlight_players_p)))
-                    points = base_layer + hi_layer
-                else:
-                    points = _apply_color_p(scatter)
-
-                # y = x reference line
-                line_ref = alt.Chart(pd.DataFrame({'x':[0,1],'y':[0,1]})).mark_line(strokeDash=[6,6], opacity=0.6).encode(x='x:Q', y='y:Q')
-
-                # Quadrant shading using thresholds
-                quads = pd.DataFrame({
-                    'x0':[0, 0, theta_danger, theta_danger],
-                    'x1':[theta_danger, theta_danger, 1, 1],
-                    'y0':[0, theta_difficult, 0, theta_difficult],
-                    'y1':[theta_difficult, 1, theta_difficult, 1],
-                    'label':['SW — GO', 'NW — TRAP', 'SE — GO', 'NE — CAUTION'],
-                    'opacity':[0.10, 0.06, 0.08, 0.04],
-                    'color':['#d7301f','#3182bd','#31a354','#969696']
-                })
-                quad_layer = alt.Chart(quads).mark_rect().encode(
-                    x=alt.X('x0:Q'), x2='x1:Q', y=alt.Y('y0:Q'), y2='y1:Q',
-                    color=alt.Color('label:N', scale=alt.Scale(domain=quads['label'].tolist(), range=quads['color'].tolist()), legend=alt.Legend(title='Zones')),
-                    opacity='opacity:Q'
-                ).properties(opacity=0.15)
-
-                # Labels for highlighted
-                if show_labels and highlight_players_p:
-                    labels = alt.Chart(filtered).transform_filter(alt.FieldOneOfPredicate(field="player", oneOf=highlight_players_p))\
-                        .mark_text(align='left', dx=7, dy=-7).encode(
-                            x='OPR_danger:Q', y='OPR_difficult:Q', text='player:N'
-                        )
-                else:
-                    labels = None
-
-                c = quad_layer + line_ref + points
-                if labels is not None:
-                    c = c + labels
-                c = c.properties(width=chart_w, height=chart_h, title="OPR (danger) vs OPR (difficult) — Trigger view")
-
+            elif choice == "OPR (danger) vs OPR (difficult)":
+                c = alt.Chart(dfp_view.dropna(subset=['OPR_danger','OPR_difficult']))\
+                    .mark_circle(size=point_size).encode(
+                        x=alt.X('OPR_danger:Q', title='OPR (danger)'),
+                        y=alt.Y('OPR_difficult:Q', title='OPR (difficult)'),
+                        tooltip=['player','team','OPR_danger','OPR_difficult','pressures_pm']
+                    )
+                c = _apply_color_p(c).properties(width=chart_w, height=chart_h, title="Value vs technical difficulty (under pressure)")
                 st.altair_chart(c, use_container_width=True)
-                _save_html(c, "press_opr_danger_vs_difficult_trigger.html")
+                _save_html(c, "press_opr_danger_vs_difficult.html")
 
             elif choice == "Bar: Top OPR":
                 df_bar = dfp_view.sort_values('OPR', ascending=False).head(15)
@@ -662,58 +576,55 @@ with TAB_RADAR:
             dfp_view = dfp if team_sel == '— All —' else dfp[dfp['team'] == team_sel]
 
             players = sorted(dfp_view['player'].dropna().unique().tolist())
-            if not players:
-                st.warning("No players available after filters.")
+            p1 = st.selectbox('Player A', players)
+            p2 = st.selectbox('Player B (optional)', ['—'] + players)
+            p2 = None if p2 == '—' else p2
+
+            metrics_sel = st.multiselect('Radar metrics (3–12)', options=[c for c in dfp_view.columns if c.endswith('_n')],
+                                         default=[c for c in dfp_view.columns if c.endswith('_n')][:8])
+            if len(metrics_sel) < 3:
+                st.info("Select at least 3 metrics.")
             else:
-                p1 = st.selectbox('Player A', players)
-                p2 = st.selectbox('Player B (optional)', ['—'] + players)
-                p2 = None if p2 == '—' else p2
-
-                metrics_sel = st.multiselect('Radar metrics (3–12)', options=[c for c in dfp_view.columns if c.endswith('_n')],
-                                             default=[c for c in dfp_view.columns if c.endswith('_n')][:8])
-                if len(metrics_sel) < 3:
-                    st.info("Select at least 3 metrics.")
-                else:
+                try:
+                    plt = importlib.import_module('matplotlib.pyplot')
+                    Radar = getattr(importlib.import_module('mplsoccer'), 'Radar')
+                    lowers, uppers = [], []
+                    for m in metrics_sel:
+                        s = pd.to_numeric(dfp_view[m], errors='coerce')
+                        lo = float(np.nanpercentile(s, 5)); hi = float(np.nanpercentile(s, 95))
+                        if not np.isfinite(lo) or not np.isfinite(hi) or hi == lo:
+                            lo, hi = float(np.nanmin(s)), float(np.nanmax(s))
+                            if hi == lo:
+                                hi = lo + 1e-6
+                        lowers.append(lo); uppers.append(hi)
+                    radar = Radar(metrics_sel, lowers, uppers, num_rings=4)
+                    v_a = [float(dfp_view.loc[dfp_view['player']==p1, m].iloc[0]) for m in metrics_sel]
+                    v_b = [float(dfp_view.loc[dfp_view['player']==p2, m].iloc[0]) for m in metrics_sel] if p2 else None
+                    fig, ax = plt.subplots(figsize=(9.5,9.5))
+                    radar.setup_axis(ax=ax)
+                    radar.draw_circles(ax=ax, facecolor="#f3f3f3", edgecolor="#c9c9c9", alpha=0.18)
                     try:
-                        plt = importlib.import_module('matplotlib.pyplot')
-                        Radar = getattr(importlib.import_module('mplsoccer'), 'Radar')
-                        lowers, uppers = [], []
-                        for m in metrics_sel:
-                            s = pd.to_numeric(dfp_view[m], errors='coerce')
-                            lo = float(np.nanpercentile(s, 5)); hi = float(np.nanpercentile(s, 95))
-                            if not np.isfinite(lo) or not np.isfinite(hi) or hi == lo:
-                                lo, hi = float(np.nanmin(s)), float(np.nanmax(s))
-                                if hi == lo:
-                                    hi = lo + 1e-6
-                            lowers.append(lo); uppers.append(hi)
-                        radar = Radar(metrics_sel, lowers, uppers, num_rings=4)
-                        v_a = [float(dfp_view.loc[dfp_view['player']==p1, m].iloc[0]) for m in metrics_sel]
-                        v_b = [float(dfp_view.loc[dfp_view['player']==p2, m].iloc[0]) for m in metrics_sel] if p2 else None
-                        fig, ax = plt.subplots(figsize=(9.5,9.5))
-                        radar.setup_axis(ax=ax)
-                        radar.draw_circles(ax=ax, facecolor="#f3f3f3", edgecolor="#c9c9c9", alpha=0.18)
-                        try:
-                            radar.spoke(ax=ax, color="#c9c9c9", linestyle="--", alpha=0.18)
-                        except Exception:
-                            pass
-                        radar.draw_radar(v_a, ax=ax, kwargs_radar={"facecolor":"#2A9D8F33","edgecolor":"#2A9D8F","linewidth":2})
-                        if v_b is not None:
-                            radar.draw_radar(v_b, ax=ax, kwargs_radar={"facecolor":"#E76F5133","edgecolor":"#E76F51","linewidth":2})
-                        radar.draw_range_labels(ax=ax, fontsize=10)
-                        radar.draw_param_labels(ax=ax, fontsize=11)
-                        subtitle = team_sel if team_sel != '— All —' else 'All teams'
-                        ax.set_title((p1 if p2 is None else f"{p1} vs {p2}") + f" — {subtitle}", fontsize=16, pad=18)
-                        st.pyplot(fig, use_container_width=True)
+                        radar.spoke(ax=ax, color="#c9c9c9", linestyle="--", alpha=0.18)
+                    except Exception:
+                        pass
+                    radar.draw_radar(v_a, ax=ax, kwargs_radar={"facecolor":"#2A9D8F33","edgecolor":"#2A9D8F","linewidth":2})
+                    if v_b is not None:
+                        radar.draw_radar(v_b, ax=ax, kwargs_radar={"facecolor":"#E76F5133","edgecolor":"#E76F51","linewidth":2})
+                    radar.draw_range_labels(ax=ax, fontsize=10)
+                    radar.draw_param_labels(ax=ax, fontsize=11)
+                    subtitle = team_sel if team_sel != '— All —' else 'All teams'
+                    ax.set_title((p1 if p2 is None else f"{p1} vs {p2}") + f" — {subtitle}", fontsize=16, pad=18)
+                    st.pyplot(fig, use_container_width=True)
 
-                        colp1, colp2 = st.columns(2)
-                        with colp1:
-                            buf_png = io.BytesIO(); fig.savefig(buf_png, format='png', dpi=300, bbox_inches='tight'); buf_png.seek(0)
-                            st.download_button('Download Radar (PNG)', buf_png.getvalue(), file_name='player_radar.png')
-                        with colp2:
-                            buf_pdf = io.BytesIO(); fig.savefig(buf_pdf, format='pdf', bbox_inches='tight'); buf_pdf.seek(0)
-                            st.download_button('Download Radar (PDF)', buf_pdf.getvalue(), file_name='player_radar.pdf')
-                    except Exception as e:
-                        st.error(f"Radar plotting requires matplotlib + mplsoccer. Error: {e}")
+                    colp1, colp2 = st.columns(2)
+                    with colp1:
+                        buf_png = io.BytesIO(); fig.savefig(buf_png, format='png', dpi=300, bbox_inches='tight'); buf_png.seek(0)
+                        st.download_button('Download Radar (PNG)', buf_png.getvalue(), file_name='player_radar.png')
+                    with colp2:
+                        buf_pdf = io.BytesIO(); fig.savefig(buf_pdf, format='pdf', bbox_inches='tight'); buf_pdf.seek(0)
+                        st.download_button('Download Radar (PDF)', buf_pdf.getvalue(), file_name='player_radar.pdf')
+                except Exception as e:
+                    st.error(f"Radar plotting requires matplotlib + mplsoccer. Error: {e}")
 
 # ==================================
 # ABOUT
@@ -722,9 +633,15 @@ with TAB_NOTES:
     st.subheader("About this app & methods")
     st.markdown(
         """
-        **Under Pressure → Trigger view** adds: y=x reference line, quadrant shading with adjustable thresholds, point size = press load, quick trigger filter, and a labels toggle for highlighted players.
         **Runs module** adds: *expected threat per attempt*, *dangerous attempt share*, and an updated **Creator Index v2**.
         **Under Pressure module** adds: *throughput of successful passes* and a **safe action rate**.
+
+        **Quality exports**: every Altair chart now has **width/height controls** and larger default sizes, so your **HTML exports are bigger and sharper**. Team coloring is consistent using a Tableau palette.
+
+        **References (non-exhaustive)**
+        - Merlin et al. (2022) — determinants of pass difficulty (receiver, trajectory, zones, passer).
+        - Anzer & Bauer (2022) — Expected Passes models.
+        - Fernández, Bornn & Cervone (2019/2021) — EPV concepts.
 
         All charts are interactive (hover) and downloadable as standalone HTML; tables and leaderboards export to XLSX.
         """
